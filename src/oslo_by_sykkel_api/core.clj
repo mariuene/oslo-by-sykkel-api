@@ -8,56 +8,83 @@
   (:gen-class))
 
 
-(defonce BIKE_STATUS_URL "https://gbfs.urbansharing.com/oslobysykkel.no/station_information.json" )
-(defonce BIKE_INFO_URL "https://gbfs.urbansharing.com/oslobysykkel.no/station_status.json" )
+(defonce BIKE_STATUS_URL "https://gbfs.urbansharing.com/oslobysykkel.no/station_information.json")
+(defonce BIKE_INFO_URL "https://gbfs.urbansharing.com/oslobysykkel.no/station_status.json")
 
-(defn fetch-data [url]
-  (-> (http/get url {:as :edn})
-      :body
-      (ch/parse-string true)
-      :data
-      :stations))
+(defn fetch-data*
+  [url]
+  (:body (http/get url {:as :edn})))
+
+(defn parse-data
+  [data]
+  (some->
+   data
+   (ch/parse-string true)
+   :data
+   :stations))
+
+(defn fetch-data
+  [url]
+  (some-> (fetch-data* url)
+          (parse-data)))
+
+(defn not-found
+  ([station_id]
+   {:status  404
+    :headers {"Content-Type" "application/json"}
+    :body    (format "Station with ID %s was not found" station_id)})
+  ([]
+   {:status  404
+    :headers {"Content-Type" "application/json"}
+    :body     "No stations found"}))
+
+(defn response
+  [data]
+  {:status  200
+   :headers {"Content-Type" "application/json"}
+   :body    (json/write-str data)})
 
 (defn filter-by-id-pred [station_id]
-  (fn [station] (= station_id (:station_id station))))
+  (fn [station]
+    (= station_id (:station_id station))))
 
 (defn station-status "station-status"
   []
   (let [stations-statuses (fetch-data BIKE_STATUS_URL)]
-  {:status  200
-   :headers {"Content-Type" "application/json"}
-   :body    (json/write-str stations-statuses)}))
+    (if (not-empty stations-statuses)
+      (response stations-statuses)
+      (not-found))))
 
 (defn station-status-by-id "station-status-by-id"
   [station_id]
-  (let [stations-statuses (->> (fetch-data BIKE_STATUS_URL)
-                               (filter (filter-by-id-pred station_id))
-                               (first))]
-    {:status  200
-     :headers {"Content-Type" "application/json"}
-     :body    (json/write-str stations-statuses)}))
+  (let [station-status (->> (fetch-data BIKE_STATUS_URL)
+                            (filter (filter-by-id-pred station_id))
+                            (first))]
+    (if (not-empty station-status)
+      (response station-status)
+      (not-found))))
 
 (defn station-info "station-info"
   []
   (let [stations-info (fetch-data BIKE_INFO_URL)]
-    {:status  200
-     :headers {"Content-Type" "application/json"}
-     :body    (json/write-str stations-info)}))
+    (if (not-empty stations-info)
+      (response stations-info)
+      (not-found))))
 
 (defn station-info-by-id "station-info-by-id"
   [station_id]
-  (let [stations-info (->> (fetch-data BIKE_INFO_URL)
-                           (filter (filter-by-id-pred station_id))
-                           (first))]
-    {:status  200
-     :headers {"Content-Type" "application/json"}
-     :body    (json/write-str stations-info)}))
+  (let [station-info (->> (fetch-data BIKE_INFO_URL)
+                          (filter (filter-by-id-pred station_id))
+                          (first))]
+    (if (not-empty station-info)
+      (response station-info)
+      (not-found station_id))))
 
 (defroutes app-routes
-           (GET "/status/" [] (station-status))
-           (GET "/status/:station_id" [station_id] (station-status-by-id station_id))
-           (GET "/info/" [] (station-info))
-           (GET "/info/:station_id" [station_id] (station-info-by-id station_id)))
+  (GET "/status/" [] (station-status))
+  (GET "/status/:station_id" [station_id] (station-status-by-id station_id))
+  (GET "/info/" [] (station-info))
+  (GET "/info/:station_id" [station_id] (station-info-by-id station_id)))
 
 (defn -main
   "Main Program"
